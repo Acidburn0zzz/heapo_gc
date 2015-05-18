@@ -3,9 +3,9 @@
 #include <pos-lib.h>
 #include <string.h>
 #include <time.h>
-#include "list/pos-list.h" 
-#include "hashtable/pos-hashtable.h"
-#include "hashtable/pos-hashtable_private.h" 
+//#include "list/pos-list.h" 
+//#include "hashtable/pos-hashtable.h"
+//#include "hashtable/pos-hashtable_private.h" 
 #include "btree/pos-btree.h" 
 //#include "btree/@btree-type.h" 
 //#include "btree/@btree-128.h" 
@@ -43,9 +43,6 @@ static void smerge(char * name , struct btree_head * head , struct btree_geo * g
          int level ,unsigned long * left , int lfill ,
          unsigned long * right , int rfill ,
          unsigned long * parent , int lpos);
- int sbtree_remove_level( char * name , struct btree_head * head , struct btree_geo * geo , unsigned long *key , int level );
-static void sbtree_shrink( char * name , struct btree_head * head , struct btree_geo * geo);
-static void srebalance(char * name , struct  btree_head * head , struct btree_geo * geo , unsigned long * key , int level , unsigned long * child , int fill );
 
 //dk s
 extern char* Alloc_tree;
@@ -122,596 +119,11 @@ pthread_mutex_t m_mutex = PTHREAD_MUTEX_INITIALIZER;
 void m_lock(){ pthread_mutex_lock(&m_mutex);}
 void m_unlock(){ pthread_mutex_unlock(&m_mutex);}
 static char * obj_store ; //object storage name - argv[1] 
-//static struct intset_t * set ;
-int spos_list_open(char *name)
-{
-        #if UNDO_CONSISTENCY == 0 
-        //printf("not undo logging\n") ;
-        #endif
-        if (pos_map(name) == 1) {
-                return 0;
-        } else
-                return -1;
-}
-void spos_list_close(char *name)
-{
-        pos_unmap(name);
-}
-int spos_list_init(char *name)
-{
-        struct list_head *head;
-        if (pos_create(name) == 0)
-                return -1;
-        head = (struct list_head *)pos_malloc(name, sizeof(struct list_head));
-        pos_set_prime_object(name, head);
-        head->head = NULL;
-        
-	pos_unmap(name);
-
-        return 0;
-}
-static int size = 0 ; 	
-void spos_hashtable_count( char * name ){ 
-	struct hashtable * h ; 
-	h = pos_get_prime_object( name ) ; 	
-	//printf(" found head %lu\n" , h ) ; 	
-	int i = 0 ; 	
-	//printf(" entry count : %d\n" , h->entrycount) ; 	
-	int tablelength = h->tablelength ; 	
-	for( i = 0 ; i < tablelength  ; i++){ 
-		struct entry * e ; 	
-		e = h->table[i] ; 	
-		while( e!=NULL){
-			size++ ;	
-			e = e->next ; 
-		}
-	}	
-	//printf(" size : %d\n" , size) ;
-}
-unsigned long sdefault_hashfunction(unsigned long *key)
-{
-	unsigned long hash;
-	int i;
-	
-	hash = 0;
-	for (i=0; i<KEY_SIZE; i++) {
-		hash += (unsigned long)key[i];
-		hash += (unsigned long)(key[i]>>sizeof(unsigned long));
-	}
-	return hash;
-}
-
-int sdefault_key_eq_fn(unsigned long *key1, unsigned long *key2)
-{
-	int i;
-	for (i=0; i<KEY_SIZE; i++) {
-		//printf("key1[%d]=%d\n", i , key1[i]) ; 	
-		//printf("key2[%d]=%d\n" ,i , key2[i]) ;
-		int a= key1[i] ; 	
-		int b= key2[i] ; 	
-		if( a!=b )return 0 ; 			
-		//if (key1[i] != key2[i]){
-//
-//			return 0;
-//		}
-	}
-	//printf("*********return 1*************\n") ;
-	return 1;
-}
-static int sum = 0 ;	 
-int temp_hashtable_remove( char * name , struct hashtable * h , unsigned long *k){ 
-	struct entry * prev , *b ; 	
-	unsigned long hashvalue , index ; 	
-	int result = 0 ; // whether find node or not find.
-
-	TM_START(0 ,RW) ; // transaction start 
-
-	hashvalue = hash( h , k ); 
-	int tablelength = (int)TM_LOAD(&h->tablelength) ; 	
-	index = indexFor( tablelength , hashvalue ) ; 	
-	prev = b = (struct entry *)TM_LOAD(&h->table[index]) ;
-	result = 0 ; 	
-	while( b != NULL ){
-		if(( hashvalue == b->h ) && sdefault_key_eq_fn( k , b->k )){ 
-			//printf("matching\n") ; 	
-			result = 1 ; 	
-			goto ret; 
-		}
-		prev = b ; 	
-		b = (struct entry *)TM_LOAD(&b->next) ; 	
-	}	
-	ret: 
-	if(result){ // matching entry so end normaly.
-		if( prev == b ) TM_STORE( &h->table[index] , TM_LOAD(&b->next)) ; 	
-		else TM_STORE(&prev->next , TM_LOAD(&b->next)) ; 	
-		//pos_free part.
-	}
-	TM_COMMIT ; 
-	return result ; 
-
-}
-int shashtable_remove( char * name , struct hashtable * h , unsigned long * k){ 
-    struct entry *e;
-    struct entry **pE;
-//    lock();  	
-    unsigned long hashvalue, index;
-
-//        pos_transaction_start(name, POS_TS_REMOVE);
-//    TM_START(3,RW) ; 	
-    //printf("[%s]\n" , __func__ ) ; 	
-    //printf(" k = %d and head : %lu\n" , *k , h) ; 	
-
-    hashvalue = hash(h,k);
- 
-    TM_START(4 , RW) ; 	
-    int tablelength = (int)TM_LOAD(&h->tablelength) ; 	
-    index = indexFor(tablelength, hashvalue);
-
-    //e = h->table[index] ; 	
-    pE = &(h->table[index]) ; 		
-    //printf(" pE : %lu\n", pE) ; 	
-
-    pE = (struct entry **)TM_LOAD(&(h->table[index])) ; 	
-    //printf("ApE : %lu\n", pE) ; 		
-    e = *pE ; 
-    // pE has hashtable address and e has first node in hashtable.
-    while( e!= NULL ){ 
-	if(( hashvalue == e->h) && sdefault_key_eq_fn( k , e->k )){ 
-		*pE = e->next ; 	
-		h->entrycount-- ; 	
-		//pos_free(name , e->v) ; 	
-		//pos_free(name , e) ; 	
-		goto ret;
-		//return 0 ; 	
-	}
-	pE = &(e->next) ; 	
-	e = e->next ; 	
-    }
-    ret:
-    TM_COMMIT ;  
-    return -1; 
- 
-    
-//    pE = &(h->table[index]);
-//    e = *pE;
-//    printf(" hashvalue : %d\n" , hashvalue) ;
-//    printf(" e->h : %d\n" , e->h) ; 
-//    printf(" hashvalue : %ld\ne->h : %ld\n" ,hashvalue , e->h ) ;
-/*    sleep(1);
-    while( e != NULL ){ 
-	if( hashvalue == e->h && sdefault_key_eq_fn( k , e->k )){ 
-		//matching point found!
-		printf("match\n") ;
-		 
-	}
-	e = e->next ; 
-	printf("e = %lu\n") ; 	
-    }*/ 
-/*    while (NULL != e)
-    {
-	//if (( hashvalue == e->h) && sdefault_key_eq_fn( k , e->k)){
-        if ((hashvalue == e->h) && (h->eqfn(k, e->k)))
-        {
-		printf("match\n") ;
-		sleep(1);
-            //pos_write_value(name, (unsigned long *)pE , (unsigned long)e->next);
-            //pos_write_value(name, (unsigned long *)&h->entrycount, (unsigned long)(h->entrycount-1));
-            *pE = e->next;
-            h->entrycount--;
-            //v = e->v;
-
-            //freekey(e->k);
-            //free(e);
-            pos_free(name, e->v);
-            pos_free(name, e);
-
-  //              pos_transaction_end(name);
-
-            //return v;
-	   // unlock() ;
-            return 0;
-        }
-        pE = &(e->next);
-        e = e->next;
-    }
-	
-        //pos_transaction_end(name);
-
-    //return NULL;
- //   unlock() ; 	
-    return -1;
-	*/
-} 
-int spos_hashtable_remove( char * name , void * _k ){ 
-	struct hashtable * h ; 	
-	unsigned long * k ; 	
-	if( name == NULL || _k == NULL){
-	//	printf(" name or k null\n") ;
-		 return -1;
-	}
-	k = (unsigned long *)_k ; 	
-	h = (struct hashtable *)pos_get_prime_object(name);
-	//printf(" head : %lu\n" , h) ; 	
-
-	//return shashtable_remove(name, h , k); 
-	return temp_hashtable_remove(name ,h , k) ;
-} 
 
 
-// Later we modified to execute stm rules.
-// We think this function is rare to conflict.
-int
-shashtable_expand( char * name , struct hashtable * h){
-     /* Double the size of the table to accomodate more entries */
-    struct entry **newtable;
-    struct entry *e;
-    struct entry **pE;
-    unsigned int newsize, i, index;
-
-    /* Check we're not hitting max capacity */
-    if (h->primeindex == (sprime_table_length - 1)) return 0;
-    newsize = primes[++(h->primeindex)];
-
-    //newtable = (struct entry **)malloc(sizeof(struct entry*) * newsize);
-    newtable = (struct entry **)pos_malloc(name, sizeof(struct entry*) * newsize);
-    if (NULL != newtable)
-    {
-        memset(newtable, 0, newsize * sizeof(struct entry *));
-        pos_clflush_cache_range(newtable, newsize * sizeof(struct entry *));
-        /* This algorithm is not 'stable'. ie. it reverses the list
-         * when it transfers entries between the tables */
-        for (i = 0; i < h->tablelength; i++) {
-            while (NULL != (e = h->table[i])) {
-               //pos_write_value(name, (unsigned long *)&h->table[i], (unsigned long)e->next);
-                h->table[i] = e->next ;
-                index = indexFor(newsize,e->h);
-               // pos_write_value(name, (unsigned long *)&e->next, (unsigned long)newtable[index]);
-                e->next = newtable[index];
-                newtable[index] = e;
-            }
-        }
-        //free(h->table);
-        //pos_free(name, h->table);////////////////////////////////// 
-        h->table = newtable;
-    }
-          //pos_write_value(name, (unsigned long *)&h->tablelength, (unsigned long)newsize);
-          //pos_write_value(name, (unsigned long *)&h->loadlimit, (unsigned long)newtable[index]);
-    // Delayed flush...
-          h->tablelength = newsize ;
-          h->loadlimit = (unsigned int)ceil(newsize * smax_load_factor);
-    return -1;
-}
-int
-shashtable_stm_insert( char * name , struct hashtable * h , unsigned long * k ,unsigned long * v ,
-			unsigned long v_size){ 
-	unsigned int index ; 	
-	struct entry * e;
-//	t_lock() ; 	  	
-	TM_START(1 , RW) ; 
-		int entrycount = (int)TM_LOAD(&h->entrycount) ; 	
-		int loadlimit = (int)TM_LOAD(&h->loadlimit) ; 	
-		//printf(" entrycount : %d\n, loadlimit : %d\n" , entrycount , loadlimit) ; 	
-
-		TM_STORE(&h->entrycount , entrycount+1) ; 	
-		//printf(" entrycount : %d\n" , h->entrycount) ; 	
-	
-		if( entrycount+1 > loadlimit ){ 
-			//lock();
-			shashtable_expand(name ,h) ;   
-			//shashtable_stm_expand( name , h ); //implement to atomic
-			//unlock() ; 	
-		}
-
-		// alloc hash node
-		lock() ; 
-		e = (struct entry *)pos_malloc(name , sizeof( struct entry)) ; 	
-		unlock() ; 	
-		//printf(" entry address : %lu\n" , e) ; 
-		e->h = hash( h , k ) ; 	
-		//printf(" hash code %d\n" , e->h ) ; 	
-
-		//table legnth also loading in this case. 
-		int tablelength = (int)TM_LOAD(&h->tablelength); 
-		//printf("table length : %d\n" , tablelength) ; 
-		index = indexFor(tablelength , e->h);
-		//printf(" index : %d\n" , index) ;
-		memcpy( e->k , k , sizeof(unsigned long)*KEY_SIZE) ;
-
-		lock() ; 
-		e->v = (unsigned long*)pos_malloc( name , v_size) ; 	
-		unlock() ; 	
-		memcpy( e->v , v , v_size ) ; 	
-
-		pos_clflush_cache_range(e->v , v_size) ; 	
-
-		e->next = (struct entry *)TM_LOAD(&h->table[index]); 
-		//e->next = (struct entry *)h->table[index];
-		//printf("e->next : %lu\n" , e->next) ;
-		pos_clflush_cache_range(e , sizeof(struct entry)); 
-		TM_STORE(&h->table[index] , e) ; 	
-		//printf(" h->table[%d] : %lu\n" , index , e) ; 
-		TM_COMMIT ; 	
-//	t_unlock() ;
-} 	
-int
-shashtable_insert(char *name, struct hashtable *h, unsigned long *k, unsigned long *v,
-                unsigned long v_size)
-{
-    /* This method allows duplicate keys - but they shouldn't be used */
-    unsigned int index;
-    struct entry *e;
-   // printf("[%s] \n" , __func__ ) ;
-//   lock() ;
-//transaction start 
-    if (++(h->entrycount) > h->loadlimit)
-    {
-        /* Ignore the return value. If expand fails, we should
-         * still try cramming just this value into the existing table
-         * -- we may not have memory for a larger table, but one more
-         * element may be ok. Next time we insert, we'll try expanding again.*/
-        //hashtable_expand(h);
-	//printf("expand\n") ; 	
-        shashtable_expand(name, h);
-    }
-    t_lock(); 
-    e = (struct entry *)pos_malloc(name, sizeof(struct entry));
-    t_unlock() ; 	
-    if (NULL == e) { --(h->entrycount); return -1; } /*oom*/
-   // printf(" entry : %lu\n" ,e ) ; 	
-
-    e->h = hash(h,k);
-    
-    index = indexFor(h->tablelength,e->h);
-   // printf(" index : %d\n" , index) ; 	
-
-    memcpy(e->k, k, sizeof(unsigned long)*KEY_SIZE);
-
-    e->v = (unsigned long *)pos_malloc(name, v_size);
-    memcpy(e->v, v, v_size);
-    pos_clflush_cache_range(e->v, v_size);
-    
-    e->next = h->table[index];
-    
-    pos_clflush_cache_range(e, sizeof(struct entry)); // Delayed flush
-
-    //pos_write_value(name, (unsigned long *)&h->table[index], (unsigned long)e);
-    h->table[index] = e;
-
-
-//transaction end
-//unlock() ; 
-	
-    return 0;
-
-}
-
-
-int
-spos_hashtable_insert(char * name, void *_k , void *_v , unsigned long v_size ){ 
-	struct hashtable *h;
-        unsigned long *k, *v;
-        if (name==NULL || _k==NULL || _v==NULL)
-                return -1;
-
-        k = (unsigned long *)_k;
-        v = (unsigned long *)_v;
-	//printf("spos_hashtable_insert : k%d v%d\n" , *k , *v) ; 	
-        h = (struct hashtable *)pos_get_prime_object(name);
-	//printf(" head : %lu\n" , h) ; 	
-//	return shashtable_insert(name , h , k , v , v_size ) ;
-        return shashtable_stm_insert(name, h, k, v, v_size);
-} 
-int 
-spos_hashtable_close(char * name){ 
-	pos_unmap(name) ;
-} 
-int 
-spos_hashtable_open( char * name ){ 
-	
-	      if (pos_map(name) == 1) {
-                // If transaction was ended abnormally.
-                // Recovery is executed.
-                return 0;
-        	} else
-                return -1;
-} 
-int
-spos_create_hashtable(char *name, unsigned int minsize,
-                 unsigned long (*hashfunction) (unsigned long*),
-                 int (*key_eq_fn) (unsigned long*,unsigned long*))
-{
-        int rval;
-
-        if (pos_create(name) == 0)
-                return -1;
-
-        if (hashfunction == NULL && key_eq_fn == NULL) {
-	//	printf("DD\n");
-                rval = create_hashtable(name, minsize, sdefault_hashfunction, sdefault_key_eq_fn);
-        } else {
-                rval = create_hashtable(name, minsize, hashfunction, key_eq_fn);
-        }
-        pos_unmap(name);
-        return rval;
-}
-
-
-
-int list_count(){ 
-        //printf("\n\n\n\n===== LIST COUNT =======\n") ;
-        int ret_val = pos_list_open(obj_store) ;
-        //printf("ret_val = %d\n" , ret_val ) ;
-        struct list_head * head ;
-        struct list_node * node ;
-        //pos_count( obj_store ) ;
-        return 0 ;
-
-}
-
-int spos_list_insert(char *name, void *_key, void *_val, unsigned long val_size)
-{
-//      printf("[pos_list_insert]\n") ;         
-//      printf(" key = %d, val=%d\n" , *(int *)_key , *(int *)_val) ;   
-        struct list_head * head;
-        struct list_node *node;
-        unsigned long *key, *val;
-        int i;
-//      printf("[%s]\n" , __func__) ; 
-
-        key = (unsigned long *)_key;
-        val = (unsigned long *)_val;
-//      printf("key : %lu , val : %lu\n" , *key , *val) ;       
-        head = (struct list_head *)pos_get_prime_object(name);
-        if( head == NULL){
-//              printf("head pointer is null\n") ;      
-                return -1;
-        }
-//      printf("head : %lu \n" , head) ;        
-//      printf("helo\n") ; 
-        lock();
-        node = (struct list_node *)pos_malloc(name, sizeof(struct list_node));
-        unlock() ;
-
-        if( node == NULL){
-//              printf("node is NULL\n") ;
-                return -1;
-        }
-//      printf( "node size : %d , node : %lu , key :%lu\n" ,sizeof(struct list_node), node , *key ) ; 
-        for (i=0; i<KEY_SIZE; i++) {
-//              node->key[i] = key[i];
-//              printf("node->key[%d] = %d\n" , i , key[i]) ;
-                node->key[i] = key[i]  ;
-        }
-        pos_clflush_cache_range(node->key, KEY_SIZE*sizeof(unsigned long));
-        lock() ;
-        node->value = (unsigned long *)pos_malloc(name, val_size);
-        unlock() ;
-//      node->value = (unsigned long *)malloc(val_size) ; 
-        //node->value = (unsigned long *)pos_malloc(name, 16) ;
-//      printf("node->value : %lu\n" , node->value) ; 
-        /*if( node->value == NULL){ 
-                printf("NULL \n") ;
-                return -1;
-        }*/
-        pos_clflush_cache_range(&node->value, sizeof(node->value));
-        memcpy(node->value, val, val_size);
-        pos_clflush_cache_range(node->value, val_size);
-
-        node->next = head->head;
-//      printf("node->next : %lu\n" , node->next) ;     
-
-        pos_clflush_cache_range(&node->next, sizeof(node->next));
-
-        head->head = node;
-        return 0;
-}
-struct list_node* pos_alloc_node( char * name ,void *_key, void *_val,unsigned long val_size, struct list_node * next){ 
-        struct list_node * node ;       
-        unsigned long * key , * val ;   
-        key = (unsigned long *)_key ;   
-        val = (unsigned long *)_val ;   
-        // 1 STEP - Alloc Node 
-        lock();
-        node = (struct list_node *)pos_malloc(name,sizeof(struct list_node)) ;        
-        unlock() ;    
-        //node = (struct list_node *)malloc(sizeof(struct list_node)) ;   
-        if( node == NULL ){ 
-                perror("pos_malloc") ;  
-                exit(1); 
-        }
-//      printf("node alloc : %lu\n" , node) ; 
-//      printf(" key : %d val :%d\n" , *key , *val) ;   
-
-        // 2 STEP - SET value and key.
-        int i = 0 ;     
-        for(i = 0 ; i < KEY_SIZE ; i++) node->key[i] = key[i];  
-        pos_clflush_cache_range( node->key , KEY_SIZE * sizeof(unsigned long));
-        
-        lock();       
-        node->value = (unsigned long *)pos_malloc(name ,val_size) ; 
-        unlock(); 
-        //node->value = (unsigned long *)malloc(val_size);
-        pos_clflush_cache_range(&node->value , sizeof(node->value)) ;   
-        memcpy(node->value , val , val_size) ;  
-        pos_clflush_cache_range(node->value , val_size) ;       
-        node->next = next; 
-        return node ;   
-
-}
-int skey_cmp(unsigned long * key1, unsigned long * key2){ 
-	int i = 0 ; 	
-	for( i = 0 ; i < 2 ; i++ ){ 
-		if( key1[i] != key2[2] ){
-		return 0 ;	
-		}
-	}
-	return 1; 	
-} 
-int spos_list_stm_insert( char * name , void *_key , void *_val , unsigned long val_size){ 
-        struct list_node * node ;       
-        struct list_head * head ;       
-        head = ( struct list_head *)pos_get_prime_object(name) ;        
-//        lock();
-        TM_START( 1, RW ) ;     
-        node = (struct list_node *)TM_LOAD(&head->head) ;       
-  //      printf("head->head : %lu\n" , head->head) ;     
-        TM_STORE( &head->head , pos_alloc_node(name ,  _val , _key ,val_size, node )) ;         
-        TM_COMMIT ;     
-//        printf("after : %lu\n" , head->head) ; 
-//        unlock();
-} 
 pthread_mutex_t r_mutex = PTHREAD_MUTEX_INITIALIZER;
 void r_lock(){ pthread_mutex_lock(&r_mutex);}
 void r_unlock(){ pthread_mutex_unlock(&r_mutex);}
-int spos_list_remove(char *name, void *_key)
-{
-        struct list_head * head;
-        struct list_node *node, *prev_node;
-        unsigned long *key;
-	unsigned long *k ; 	      
-	int i;
-	struct list_node * next ; 	
-
-        key = (unsigned long *)_key;
-        head = (struct list_head *)pos_get_prime_object(name);
-
-	TM_START(2, RW);
-	prev_node = (struct list_node *)TM_LOAD(&head->head) ; 	
-	next = (struct list_node *)TM_LOAD(&prev_node->next) ; 	
-	
-	while( next ){ 
-		if(key_cmp(next->key , key) == 1){ // if match
-			node = ( struct list_node *)TM_LOAD(&next->next) ; 	
-			TM_STORE(&prev_node->next , node ) ; 	
-			//prev_node->next = next->next ; 	
-			
-		//	r_lock();	
-		//	pos_free(name , next->value) ; 	
-			//pos_free(name , next); 
-
-		//	r_unlock() ;
-
-	//		TM_COMMIT ; 	
-			goto ret; 
-	//		t_unlock() ;
-		}
-	//prev_node->next = next->next ; 
-		prev_node = next ; 	
-		next = (struct list_node *)TM_LOAD(&next->next) ;
-		//next = next->next ; 		
-	}
-	
-	ret:
-	TM_COMMIT ;
-	// after commit
-	if( next != NULL ){ 
-	r_lock() ;
-	pos_free(name , next->value) ;
-	pos_free(name , next) ;
-	r_unlock() ; 	
-	}
-	return 0;
-}
 /////////////////////////////////////////////////////////////////
 /////////// 			////////////////////////////////
 //////////   BTREE STM		///////////////////////////////
@@ -992,163 +404,6 @@ int sgetfill( struct btree_geo * geo , unsigned long * node , int start){
         return i;
 
 }
- 
-/*int sbtree_insert_level(char * name , struct btree_head * head, struct btree_geo * geo , unsigned long * key , void * val , unsigned long val_size , int level)
-{
-	// implementation list // 
-	// sbtree_grow // 
-	// sfind_level //
-	// sgetpos,sgetfill // 
-	// sbtree_node_alloc // 
-	// ssetkey , ssetval // 
-
-	// BODY START // 
-	unsigned long * node ; 	
-	int i , pos , fill ,err ; 	
-
-	if( head->height < level ){ // sbtree_grow must implemented. 
-		err = sbtree_grow( name , head , geo ) ; 	
-		if( err ) return err ; 	
-	}
-	 
-retry: 
-	// think stm issues.
-	node = sfind_level(name , head , geo , key , level) ; 	
-	pos  = sgetpos( geo , node , key ) ; 	
-	fill = sgetfill( geo , node , pos ) ; 	
-	printf("[%s] pos %d , fill %d\n" ,__func__ ,  pos , fill ) ; 	
-	printf(" node : %lu\n" , node) ; 	
-	
-	if( fill == geo->no_pairs ){ // no_pairs == 5; 
-		unsigned long * new ; 	
-		new = sbtree_node_alloc( name ) ; 	
-		if( !new ) return -ENOMEM; 	
-		err = sbtree_insert_level( name , head , geo,
-			sbkey(geo,node,fill/2 -1),	
-			new , 0 , level+1);
-		if(err) return err ; 	
-		for( i = 0 ; i < fill/2 ; i++){ 
-			ssetkey( geo , new , i , sbkey( geo , node , i)) ; 	
-			ssetval( geo , new , i , sbval( geo , node , i)) ; 	
-		
-			ssetkey( geo , new , i , sbkey( geo , node, i+fill/2));
-			ssetval( geo , new , i , sbval( geo , node, i+fill/2));
-			sclearpair( geo , node , i+fill/2) ; 	
-		}
-		if( fill & 1 ){ 
-			ssetkey(geo , node , i , sbkey(geo,node,fill-1));
-			ssetval(geo , node , i , sbval(geo,node,fill-1)); 
-			sclearpair(geo, node , fill-1);
-		}	
-		pos_clflush_cache_range( node , NODESIZE ); //128 ;
-		goto retry ; 	
-	}
-	for( i = fill ; i > pos ; i-- ){ 
-		ssetkey(geo , node , i , sbkey(geo , node , i-1)) ; 	
-		ssetval(geo , node , i , sbval(geo , node , i-1)) ; 	
-	}
-	ssetkey( geo , node , pos , key ) ; 	
-
-	if( !val_size ){ 
-		ssetval( geo , node , pos , val ) ; 		
-	}else{ 
-		void * new_val ; 
-		//lock() ; 		
-		new_val = pos_malloc( name , val_size ) ; 	
-		//unlock() ; 	
-		memcpy( new_val , val , val_size ) ; 	
-		pos_clflush_cache_range( new_val , val_size) ; 	
-		ssetval(geo , node , pos , new_val) ; 
-	}
-	pos_clflush_cache_range(node , NODESIZE) ; 	
-	return 0 ; 
-}*/ 	
-/*static int re_btree_insert_level(char * name, struct btree_head * head , 
-	struct btree_geo * geo , unsigned long * key , void * val, unsigned long val_size , int level){ 
-	unsigned long *node;
-        int i, pos, fill, err;
-
-	//lock() ; 	
-        //BUG_ON(!val);
-	int imsi ;	
-	int head_height ; 	
-	//int head->height = (int)TM_LOAD(&head->height);
-//	head_height = (int)TM_LOAD(&head->height) ; 	
-	
-//	if( head_height < level ){ 
-        if (head->height < level) {
-                err = re_btree_grow(name, head, geo);
-                if (err){
-			return err;
-			
-		}
-        }
-retry:
-        node = sfind_level(name, head, geo, key, level);
-        pos = sgetpos(geo, node, key);
-        fill = sgetfill(geo, node, pos);
-
-        if (fill == geo->no_pairs) {
-                unsigned long *new;
-
-                //new = btree_node_alloc(head, gfp);
-                new = sbtree_node_alloc(name);	
-                if (!new){ 
-	//		unlock() ; 	
-                        return -ENOMEM;
-		}
-                //err = btree_insert_level(head, geo,
-                //             bkey(geo, node, fill / 2 - 1),
-                //              new, level + 1, gfp);
-		 err = re_btree_insert_level(name,head,geo,
-					sbkey(geo,node,fill/2-1),new,8,level+1);
-                //err = sbtree_insert_level(name, head, geo,
-                //              sbkey(geo, node, fill / 2 - 1),
-                //                new, 0, level + 1);     // Val_size(0) indicates whether copy or not.
-                if (err) {
-	//		unlock() ; 	
-                        return err;
-                }
-                for (i = 0; i < fill / 2; i++) {
-                        ssetkey(geo, new, i, sbkey(geo, node, i));
-                        ssetval(geo, new, i, sbval(geo, node, i));
-                        ssetkey(geo, node, i, sbkey(geo, node, i + fill / 2));
-                        ssetval(geo, node, i, sbval(geo, node, i + fill / 2));
-                        sclearpair(geo, node, i + fill / 2);
-                }
-                if (fill & 1) {
-                        ssetkey(geo, node, i, sbkey(geo, node, fill - 1));
-                        ssetval(geo, node, i, sbval(geo, node, fill - 1));
-                        sclearpair(geo, node, fill - 1);
-                }
-
-                pos_clflush_cache_range(node, NODESIZE); // Delayed flush in unit of NODESIZE
-
-                goto retry;
-        }
-        //BUG_ON(fill >= geo->no_pairs);
-	printf("C\n") ;
-        for (i = fill; i > pos; i--) {
-                ssetkey(geo, node, i, sbkey(geo, node, i - 1));
-                ssetval(geo, node, i, sbval(geo, node, i - 1));
-        }
-        ssetkey( geo , node , pos , key ) ;
-        if (!val_size) {
-                ssetval(geo , node , pos , val) ;
-        } else {
-                void *new_val;
-
-                // Allocate object and copy the content 
-                new_val = pos_malloc(name, val_size);	
-                memcpy(new_val, val, val_size);
-                pos_clflush_cache_range(new_val, val_size);
-                ssetval( geo , node , pos , new_val ) ;
-        }
-                pos_clflush_cache_range(node, NODESIZE); // Delayed flush in unit of NODESIZE
- 
-        return 0;
-
-}*/
 int sbtree_remove_level( char * name , struct btree_head * head , struct btree_geo * geo , unsigned long * key , int level ){ 
 
 //	struct btree_head * sahead = pos_get_prime_object(name) ; 	
@@ -1565,18 +820,21 @@ int spos_btree_insert( char * name , void *_key , void *_val , unsigned long val
 	}
 	key = (unsigned long*)_key ; 
 	val = (unsigned long*)_val ; 
-	printf("check \n");
+//	printf("check \n");
 	head = (struct btree_head *)pos_get_prime_object(name);//get head;
+/*
 	printf("[%s] key : %d  val : %d head : %p\n" ,__func__,  *(unsigned long *)key , *val , head) ; 			
 	printf("[%s] head : %lu\n" , __func__ , head ) ; 		
+*/
+	
 //	lock() ; 
 //	lock() ; 		
 	TM_START(1,RW) ; 	
 //	unsigned long * _key = (unsigned long *)TM_LOAD(&key) ; 	
 //	void * val = (void *)TM_LOAD(&val) ; 	
-	printf("check 1\n");
+//	printf("check 1\n");
 	rval = sbtree_insert_level(name , head , &btree_geo128, _key, _val , val_size,1);
-	printf("check 2\n");
+//	printf("check 2\n");
 	//rval = sbtree_insert_level( name , head, &btree_geo128, key, val, val_size,1);
 	TM_COMMIT;
 /*	lock() ;	
@@ -1618,46 +876,6 @@ int spos_btree_insert( char * name , void *_key , void *_val , unsigned long val
 
 }*/
  
-void* stm_list_remove(void * data){ 
-	//printf("[%s] \n" , __func__) ; 	
-	int i = 0 ; 	
-	TM_INIT_THREAD ; 	
-	for(i = 0 ; i < 3000 ; i++){ 
-		spos_list_remove( obj_store, &i ) ;
-	}
-	TM_EXIT_THREAD ; 
-	return NULL;
-}  
-void* stm_list_insert(void * data){ 
-	//printf("[%s] \n" , __func__) ; 	
-	int i = 0 ; 
-	TM_INIT_THREAD;
-	for( i = 0 ; i < 3000 ; i++ ){
-//	printf("%d\n" , i) ; 
-		//pos_list_stm_insert( obj_store , &i  , &i , 8 ) ; 	
-		spos_list_stm_insert( obj_store , &i , &i, 8) ;
-//		spos_list_insert(obj_store , &i , &i , 8) ;
-//		set_add(set , &i) ; 	
-	}
-	TM_EXIT_THREAD; 
-	return NULL;
-}
-void* stm_hash_insert( void * data ){ 
-	//printf("[%s] \n" , __func__ ) ; 	
-	int i = 0 ; 
-		
-	TM_INIT_THREAD ; 	
-	for( i = 0 ; i < 3000 ; i++ ){ 
-//		spos_hash_stm_insert( obj_sto
-//		lock() ; 	
-		spos_hashtable_insert( obj_store , &i , &i, 8 ) ; 	
-		//pos_hashtable_insert( obj_store , &i , &i, 8) ;
-//		unlock() ;
-//		spos_hashtable_stm_insert( obj_store , &i , &i , 8) ; 	
-
-	}
-	TM_EXIT_THREAD ; 	
-} 
 static int btree_sum = 0 ; 	 
 void* normal_btree_insert(void * data){ 
 	int dat = *(int *)data ; 	
@@ -1704,7 +922,7 @@ void* stm_btree_insert(void * data){
 	printf("[%s]\n" , __func__ ) ; 	
 	int dat = *(int *)data ; 	
 	printf("data : %d\n" , dat) ; 
-	int ret_dat = dat*1000; 	
+	int ret_dat = dat*100; 	
 	
 	int i = 0 ; 	
 	TM_INIT_THREAD ; 
@@ -1751,16 +969,7 @@ void* stm_btree_lookup(void * data){
 		printf("[%d] found addr : [%p]\n" , i , addr) ;
 	}
 }  
-void* stm_hash_remove( void * data ){ 
-	//printf("[%s] \n" , __func__ ) ; 	
-	int i = 0 ; 	
-	TM_INIT_THREAD ; 	
-	for(i = 0 ; i < 3000 ; i++){ 
-		spos_hashtable_remove(obj_store , &i) ; 
-		//pos_hashtable_remove( obj_store , &i) ;
-	}
-	TM_EXIT_THREAD ; 
-} 
+ 
 void help(){ 
 	printf("[1] normal btree insert \n") ; 	
 	printf("[2] normal btree remove \n") ; 	
@@ -1828,11 +1037,11 @@ int main(int argc , char ** argv){
 	}
 	// This Program is only btree performance program.
 	
-	printf("bt ck point 0\n");
+	//printf("bt ck point 0\n");
 	int ret = pos_btree_init(obj_store) ; 	
-	printf("init ret = %d\n", ret);
+	//printf("init ret = %d\n", ret);
 	ret = pos_btree_open( obj_store ) ; 	
-	printf("open ret = %d\n", ret);
+	//printf("open ret = %d\n", ret);
 	//printf("bt ck point 2\n");
 	
 	// global key initialization
@@ -2025,7 +1234,7 @@ int main(int argc , char ** argv){
 
 	printf("GC start\n");
 	gettimeofday(&T_GC1, NULL) ;
-	pos_btree_gc(node_ptr, obj_store);
+	garbage_count = pos_btree_gc(node_ptr, obj_store);
 	int k;
 	void * address;
 	printf("find count = %d\n", find_count);

@@ -949,7 +949,10 @@ errout:
 					}
 				}
 				//dk e
-				
+
+				//dk s
+				//pos_unmap(Alloc_tree);
+				//dk e
 				return p;
 			}
 		}
@@ -1044,7 +1047,10 @@ new_alloc:
 				}
 			}
 			//dk e
-
+			
+			//dk s
+			//pos_unmap(Alloc_tree);
+			//dk e
 			return chunk2mem(p);
 		} 
 		else

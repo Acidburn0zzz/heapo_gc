@@ -142,9 +142,8 @@ int tree_height;
 extern char* Alloc_tree;
 struct btree_head *root_node_ptr = NULL;
 unsigned long *node_ptr = NULL;
-extern garbage_count;
-extern find_count;
-
+extern int garbage_count;
+extern int find_count;
 //dk e
 
 
@@ -547,7 +546,7 @@ static int keyzero(struct btree_geo *geo, unsigned long *key)
 void * dk_buf[3000]={0};
 int dk_cnt = 0 ; 
 //dk s
-void pos_btree_gc(unsigned long *input_node, char* name)
+int pos_btree_gc(unsigned long *input_node, char* name)
 {
 	int get_fill = 0;
 	int i, j;
@@ -559,7 +558,6 @@ void pos_btree_gc(unsigned long *input_node, char* name)
 	int ret = 0;
 	unsigned long *key_ptr= NULL;
 	unsigned long key_ptr2 = 0;
-	
 	
 	//printf("traverse\n");
 	node = input_node;

@@ -6,19 +6,17 @@ all: $(BINS)
 
 %.o: $.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFINES) -c -o $@ $< 
-$(BINS) : %: %.o list/pos-list.o hashtable/pos-hashtable.o btree/pos-btree.o $(TMLIB) 
-	$(CC) -g -o $@ $< list/pos-list.o hashtable/pos-hashtable.o btree/pos-btree.o $(LDFLAGS) -L /usr/local/lib -lpos -lm -lrt 
+$(BINS) : %: %.o btree/pos-btree.o $(TMLIB) 
+	$(CC) -g -o $@ $< btree/pos-btree.o $(LDFLAGS) -L /usr/local/lib -lpos -lm -lrt 
 clean :
-	rm -rf $(BINS) *.o list/*.o hashtable/*.o btree/*.o
+	rm -rf $(BINS) *.o btree/*.o
 #all : tiny
 #tiny : list/pos-list.o workload_list.o 
 #	gcc $(CPPFLAGS) $(CFLAGS) $(DEFINES) -o tiny tiny.c  
-hashtable/pos-hashtable.o : 
-	gcc -c -o hashtable/pos-hashtable.o hashtable/pos-hashtable.c -L/usr/local/lib -lpos -lm -lstm
+
 btree/pos-btree.o:
 	gcc -c -o btree/pos-btree.o btree/pos-btree.c -L/usr/local/lib -lpos -lstm
-list/pos-list.o :
-	gcc -L/usr/local/lib -c -o list/pos-list.o list/pos-list.c -I/usr/local/include -lpos -lstm
+
 workload_list.o : 
 	gcc -c -o workload_list.o workload_list.c -ldb
 #clean : 
